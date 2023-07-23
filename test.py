@@ -1,3 +1,9 @@
+bl_info = {
+    "name": "Cube Position Logger",
+    "blender": (3, 2, 0),
+    "category": "Object",
+}
+
 import bpy
 import os
 import socket
@@ -6,12 +12,7 @@ import subprocess
 import time
 import mathutils
 import winsound
-
-bl_info = {
-    'name': 'openGOAL custom level reload on save',
-    'blender': (2, 80, 0),
-    'category': 'Import-Export'
-}
+import threading
 
 # Paths Ideally set this from a GUI in Blender later
 application_path = "C:\\Users\\NinjaPC\\Documents\\Github\\flutflut-legacy\\"
@@ -33,7 +34,6 @@ def is_goalc_running():
         return False
 
 def on_object_move(scene):
-    print("move OBJ")
     for obj in bpy.data.objects:
         # Check if the object has a 'prev_location' attribute, if not, initialize it
         if not hasattr(obj.data, "prev_location"):
@@ -44,14 +44,15 @@ def on_object_move(scene):
             # Update the previous location
             obj.data.prev_location = obj.location
 
-            # Perform your custom level reload process here for the moved object
-            export_file(scene)
+            # Run export_file in a new thread
+            thread = threading.Thread(target=export_file_in_thread, args=(scene,))
+            thread.start()
 
 def on_file_save_pre(scene):
     # Call export_file function with the current frame when the file is saved
     export_file(scene, bpy.context.scene.frame_current)
 
-def export_file(scene, current_frame):
+def export_file(scene, current_frame, x, y ,z):
     global clientSocket
 
     # Reset the socket
@@ -64,9 +65,9 @@ def export_file(scene, current_frame):
     clientSocket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     path = customLevelGLB_path
-    bpy.ops.export_scene.gltf(filepath=path, export_apply=True)
+    #bpy.ops.export_scene.gltf(filepath=path, export_apply=True)
 
-    time.sleep(3)  # Delay for 3 seconds - untested but this is just to hopefully give the glb enough time to export
+    #time.sleep(3)  # Delay for 3 seconds - untested but this is just to hopefully give the glb enough time to export
 
     # Check if goalc.exe is already running
     if not is_goalc_running():
@@ -105,25 +106,37 @@ def export_file(scene, current_frame):
     # Int block these commands are sent on startup they won't run on the client until the lt and mi finish.
     sendForm("(lt)", clientSocket)
     sendForm("(mi)", clientSocket)
-    sendForm("(move-actor \"fuel-cell-55\" {} {} {})".format(position.x, position.y, position.z), clientSocket)
+    sendForm("(move-actor \"money-2692\" {} {} {})".format(x, z,(y * -1 )), clientSocket)
 
-    time.sleep(20) # this is here to be safe; can probably be removed.
+   # time.sleep(20) # this is here to be safe; can probably be removed.
 
     # Close the socket
     clientSocket.close()
 
+last_cube_position = None
+
+def export_file_in_thread(scene):
+    # Perform your custom level reload process here for the moved object
+    export_file(scene)
+
+def log_cube_position(scene):
+    global last_cube_position
+
+    cube = bpy.data.objects.get("Cube")
+    if cube:
+        position = cube.location
+
+        if last_cube_position != position:
+            print(f"Cube Position: X: {position.x}, Y: {position.y}, Z: {position.z}")
+            export_file(scene, bpy.context.scene.frame_current, position.x, position.y, position.z)
+
+        last_cube_position = position.copy()
 
 def register():
-    unregister()  # Unregister the handlers first
-    bpy.app.handlers.frame_change_pre.append(on_object_move)
-    #bpy.app.handlers.save_pre.append(on_file_save_pre)  # Add the file save handler
+    bpy.app.handlers.depsgraph_update_post.append(log_cube_position)
 
 def unregister():
-    try:
-        bpy.app.handlers.frame_change_pre.remove(on_object_move)
-     #   bpy.app.handlers.save_pre.remove(on_file_save_pre)  # Remove the file save handler
-    except ValueError:
-        pass
+    bpy.app.handlers.depsgraph_update_post.remove(log_cube_position)
 
 if __name__ == "__main__":
     register()
